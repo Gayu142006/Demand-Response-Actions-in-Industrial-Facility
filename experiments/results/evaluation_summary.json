@@ -1,0 +1,80 @@
+{
+  "n_days": 30,
+  "n_observations": 2880,
+  "peak_threshold_kw": 750.0,
+  "n_peak_event_days": 4,
+  "peak_reduction_pct_all_days": {
+    "cost_first": 1.91,
+    "occupant_first": 1.91
+  },
+  "avg_peak_kw": {
+    "baseline": 715.1,
+    "cost_first": 698.3,
+    "occupant_first": 698.3
+  },
+  "total_demand_charge": {
+    "baseline": 1287192.0,
+    "cost_first": 1256934.0,
+    "occupant_first": 1256934.0
+  },
+  "total_energy_cost": {
+    "baseline": 2737568.14,
+    "cost_first": 2702089.86,
+    "occupant_first": 2702089.86
+  },
+  "avg_comfort_violation_min_per_day": {
+    "baseline": 1017.5,
+    "cost_first": 0.0,
+    "occupant_first": 0.0
+  },
+  "total_hard_violations": {
+    "cost_first": 0,
+    "occupant_first": 0
+  },
+  "total_optout_violations": {
+    "cost_first": 0,
+    "occupant_first": 0
+  },
+  "infeasible_days": {
+    "cost_first": 0,
+    "occupant_first": 0
+  },
+  "avg_planner_runtime_s": {
+    "cost_first": 0.0023,
+    "occupant_first": 0.0022
+  },
+  "forecast_error": {
+    "historical_average": {
+      "mae": 23.4,
+      "rmse": 37.9,
+      "actual_peak_kw": 887.6,
+      "predicted_peak_kw": 805.0,
+      "peak_error_kw": 82.6,
+      "peak_error_pct": 9.31
+    },
+    "random_forest": {
+      "mae": 37.03,
+      "rmse": 64.53,
+      "actual_peak_kw": 887.6,
+      "predicted_peak_kw": 830.8,
+      "peak_error_kw": 56.8,
+      "peak_error_pct": 6.4
+    }
+  },
+  "total_runtime_s": 0.5,
+  "peak_event_days_only": {
+    "n_days": 4,
+    "peak_reduction_pct": {
+      "cost_first": 14.34,
+      "occupant_first": 14.34
+    },
+    "avg_comfort_violation_min": {
+      "cost_first": 0.0,
+      "occupant_first": 0.0
+    },
+    "avg_reduction_kw": {
+      "cost_first": 128.3,
+      "occupant_first": 128.3
+    }
+  }
+}
