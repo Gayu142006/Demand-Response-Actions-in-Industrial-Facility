@@ -34,6 +34,7 @@ def run_planner(
     objective: str = "COST_FIRST",
     peak_threshold_kw: float = PEAK_THRESHOLD_KW,
     occupancy_known: bool = True,
+    participate_if_necessary_zones: set = None,
 ) -> PlannerOutput:
     required_reduction = max(0.0, predicted_peak_kw - peak_threshold_kw)
 
@@ -43,6 +44,7 @@ def run_planner(
         opted_out_zones=set(opted_out_zones),
         current_production_load_kw=current_production_load_kw,
         occupancy_known=occupancy_known,
+        participate_if_necessary_zones=set(participate_if_necessary_zones or []),
     )
 
     if required_reduction <= 0:

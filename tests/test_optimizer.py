@@ -79,3 +79,35 @@ def test_extreme_heat_avoids_hvac_and_shifts_to_other_equipment():
                        state=hot_state, objective="COST_FIRST")
     hvac_actions = [a for a in result.actions if a.equipment_type == "HVAC"]
     assert len(hvac_actions) == 0 or sum(a.reduction_kw for a in hvac_actions) < 5
+
+
+def test_participate_only_if_necessary_spared_when_unneeded():
+    # When target can be met by other equipment, PIN zone equipment is untouched
+    state = standard_state(participate_if_necessary_zones={"OFFICE_A"})
+    result = optimize(current_load_kw=735, predicted_peak_kw=785, required_reduction_kw=35,
+                       state=state, objective="COST_FIRST")
+    assert result.feasible
+    selected_zones = {a.zone_id for a in result.actions}
+    assert "OFFICE_A" not in selected_zones
+
+
+def test_participate_only_if_necessary_used_when_mandatory():
+    # When target CANNOT be met without PIN zone, PIN zone is recruited as last resort
+    state = standard_state(
+        equipment_status={
+            "BATTERY_CHARGE": "MAINTENANCE",
+            "COMPRESSOR_A": "MAINTENANCE",
+            "COMPRESSOR_B": "MAINTENANCE",
+        },
+        participate_if_necessary_zones={"WAREHOUSE"},
+    )
+    # Non-WAREHOUSE flexible capacity is only PUMP (22 kW) + HVAC_OFFICE (~15 kW) < 60 kW
+    result = optimize(current_load_kw=735, predicted_peak_kw=825, required_reduction_kw=60,
+                       state=state, objective="COST_FIRST")
+    assert result.feasible
+    selected_zones = {a.zone_id for a in result.actions}
+    assert "WAREHOUSE" in selected_zones
+    # Check that PIN reason tag was attached
+    warehouse_actions = [a for a in result.actions if a.zone_id == "WAREHOUSE"]
+    assert any("PARTICIPATE_ONLY_IF_NECESSARY" in r for a in warehouse_actions for r in a.reasons)
+

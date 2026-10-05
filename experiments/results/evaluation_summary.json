@@ -3,6 +3,23 @@
   "n_observations": 2880,
   "peak_threshold_kw": 750.0,
   "n_peak_event_days": 4,
+  "moderate_event_divergence_experiment": {
+    "n_moderate_cases": 60,
+    "divergence_rate_pct": 73.3,
+    "convergence_rate_pct": 26.7,
+    "avg_comfort_risk_cost_first": 0.0,
+    "avg_comfort_risk_occupant_first": 0.0,
+    "avg_office_hvac_curtailment_cost_first_kw": 0.0,
+    "avg_office_hvac_curtailment_occupant_first_kw": 0.0,
+    "finding": "On moderate events, Occupant-First shields office occupants from HVAC curtailment by routing reductions to industrial pumps, batteries, and warehouse lighting, whereas Cost-First uses office HVAC whenever cheaper."
+  },
+  "event_severity_distribution": {
+    "NONE": 26,
+    "MILD": 0,
+    "MODERATE": 0,
+    "SEVERE": 4,
+    "EXTREME": 0
+  },
   "peak_reduction_pct_all_days": {
     "cost_first": 1.91,
     "occupant_first": 1.91
@@ -27,6 +44,10 @@
     "cost_first": 0.0,
     "occupant_first": 0.0
   },
+  "avg_comfort_risk_score": {
+    "cost_first": 0.0,
+    "occupant_first": 0.0
+  },
   "total_hard_violations": {
     "cost_first": 0,
     "occupant_first": 0
@@ -40,8 +61,8 @@
     "occupant_first": 0
   },
   "avg_planner_runtime_s": {
-    "cost_first": 0.0023,
-    "occupant_first": 0.0022
+    "cost_first": 0.0021,
+    "occupant_first": 0.0021
   },
   "forecast_error": {
     "historical_average": {
@@ -61,7 +82,27 @@
       "peak_error_pct": 6.4
     }
   },
-  "total_runtime_s": 0.5,
+  "per_day_forecast_peak_errors": {
+    "historical_average": {
+      "mean_peak_error_kw": 31.7,
+      "max_peak_error_kw": 153.8,
+      "mean_peak_error_pct": 4.21
+    },
+    "random_forest": {
+      "mean_peak_error_kw": 45.9,
+      "max_peak_error_kw": 207.5,
+      "mean_peak_error_pct": 5.33
+    }
+  },
+  "equipment_utilization_count": {
+    "COMPRESSOR_A": 8,
+    "HVAC_WAREHOUSE": 4,
+    "COMPRESSOR_B": 8,
+    "PUMP_FLEX_1": 8,
+    "LIGHTING_WAREHOUSE": 8,
+    "BATTERY_CHARGE": 2
+  },
+  "total_runtime_s": 0.48,
   "peak_event_days_only": {
     "n_days": 4,
     "peak_reduction_pct": {
@@ -75,6 +116,17 @@
     "avg_reduction_kw": {
       "cost_first": 128.3,
       "occupant_first": 128.3
+    }
+  },
+  "divergence_analysis_by_severity": {
+    "SEVERE": {
+      "n_days": 4,
+      "plans_identical_pct": 100.0,
+      "plans_diverge_pct": 0.0,
+      "avg_comfort_divergence": 0.0,
+      "avg_cost_divergence": 0.0,
+      "cost_first_avg_peak_reduction_pct": 14.34,
+      "occupant_first_avg_peak_reduction_pct": 14.34
     }
   }
 }

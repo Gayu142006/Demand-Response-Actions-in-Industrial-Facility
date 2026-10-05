@@ -1,0 +1,10 @@
+{
+  "comfort_weight_cost_first": 1.0,
+  "comfort_weight_occ_first": 8.0,
+  "disruption_weight": 1.0,
+  "safety_margin_c": 3.5,
+  "pin_penalty_multiplier": 20.0,
+  "auto_approve_threshold_pct": 85.0,
+  "last_calibrated": null,
+  "tuning_rationale": "Default factory calibration"
+}

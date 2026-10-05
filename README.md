@@ -34,13 +34,19 @@ streamlit run app/main.py
 | Path | What |
 |---|---|
 | `planner/` | Core logic: facility model, constraints, OR-Tools optimizer, forecasting, baseline, validator, top-level engine, LLM assistant |
+| `planner/thermal_model.py` | 1R1C and 2R2C lumped-capacitance thermal physics model replacing linear approximations with wall-capacitance buffering |
+| `planner/iot_gateway.py` | BMS edge-gateway telemetry ingestion layer with BACnet/IP, Modbus TCP/RTU, and MQTT protocol adapters |
+| `planner/equipment_fatigue.py` | Mechanical cycling fatigue and wear-tracking engine to rotate curtailments and prevent motor/chiller degradation |
 | `planner/llm_assistant.py` | Multi-provider AI Copilot (NVIDIA Nemotron, Built-in offline explainer, OpenAI, Gemini, Claude, Ollama) |
 | `scripts/generate_data.py` | Synthetic 30-day / 2,880-interval dataset generator with 10 named scenario types |
-| `app/` | 5-page Streamlit application (Dashboard, Field Capture, Planner + AI Copilot, Approvals, Evaluation) + SQLite persistence |
-| `experiments/evaluation.py` | Runs baseline vs. cost-first vs. occupant-first over the full dataset, writes real measured results |
-| `tests/` | 38 pytest tests: constraints, optimizer, planner engine, LLM assistant, baseline/forecast, database/offline-sync |
+| `app/` | 9-page Streamlit application (Dashboard, Field Capture, Planner + AI Copilot, Approvals, Evaluation, IoT Gateway, Thermal Lab, Validation, Equipment Fatigue) |
+| `app/api.py` | Starlette/ASGI REST API backend exposing endpoints for planning, telemetry ingestion, thermal simulation, and validation |
+| `experiments/evaluation.py` | Full empirical evaluation: cost-first vs occupant-first divergence on moderate events & per-day forecast peak errors |
+| `experiments/evaluation_notebook.ipynb` | Executable Jupyter Notebook companion deliverable with interactive Plotly & Matplotlib figures |
+| `tests/` | 59 unit & integration tests across all modules (constraints, optimizer, thermal models, IoT gateway, fatigue, validation) |
+| `validation/protocol.py` | Programmatic multi-stakeholder validation questionnaire & scoring rubric (Usability, Trust, Safety, Explainability, Privacy) |
+| `validation/adaptive_tuner.py` | Feedback-driven adaptive calibration that automatically tunes optimizer weights and safety margins from stakeholder scores |
 | `docs/` | Architecture, failure modes, privacy, honest scope/limitations |
-| `validation/` | Stakeholder-validation protocol (marked not-performed — no real stakeholders were available) |
 
 ## AI Copilot & Decision Explainer
 

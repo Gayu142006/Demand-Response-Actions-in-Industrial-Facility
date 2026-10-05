@@ -12,7 +12,17 @@ st.sidebar.title("⚡ OADRP")
 st.sidebar.caption("Occupant-Aware Demand Response Planner")
 page = st.sidebar.radio(
     "Navigate",
-    ["Dashboard", "Field Capture", "Planner", "Approvals", "Evaluation"],
+    [
+        "Dashboard",
+        "Field Capture",
+        "Planner",
+        "Approvals",
+        "Evaluation",
+        "IoT Gateway",
+        "Thermal Lab",
+        "Validation & Feedback",
+        "Equipment Fatigue",
+    ],
     label_visibility="collapsed",
 )
 
@@ -105,3 +115,15 @@ elif page == "Approvals":
 elif page == "Evaluation":
     from app.views import evaluation
     evaluation.render()
+elif page == "IoT Gateway":
+    from app.views import iot_gateway_view
+    iot_gateway_view.render()
+elif page == "Thermal Lab":
+    from app.views import thermal_lab_view
+    thermal_lab_view.render()
+elif page == "Validation & Feedback":
+    from app.views import validation_view
+    validation_view.render()
+elif page == "Equipment Fatigue":
+    from app.views import equipment_fatigue_view
+    equipment_fatigue_view.render()

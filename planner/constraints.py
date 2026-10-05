@@ -5,12 +5,17 @@ Hard constraints are deterministic and can NEVER be relaxed by the
 optimizer, no matter which objective is active (spec sections 15 & 17,
 design principle 5.2). Soft constraints become optimization penalties
 (section 16).
+
+Phase 2: The linear temperature approximation (projected_rise = kW * 0.06)
+has been replaced with the 1R1C/2R2C lumped-capacitance thermal model from
+planner/thermal_model.py, providing physics-informed comfort guarantees.
 """
 from dataclasses import dataclass
 from typing import Optional
 from planner.facility_config import (
     get_zone, ZONE_SAFETY_MARGIN, MINIMUM_PRODUCTION_LOAD_KW,
 )
+from planner.thermal_model import projected_temperature_rise, max_safe_reduction
 
 
 @dataclass
@@ -31,6 +36,11 @@ class FacilityState:
     opted_out_zones: set             # zone_ids under TEMPORARY_OPT_OUT right now
     current_production_load_kw: float
     occupancy_known: bool = True     # False => missing-occupancy failure case
+    participate_if_necessary_zones: set = None  # zone_ids under PARTICIPATE_ONLY_IF_NECESSARY
+
+    def __post_init__(self):
+        if self.participate_if_necessary_zones is None:
+            self.participate_if_necessary_zones = set()
 
 
 @dataclass
@@ -68,6 +78,8 @@ def validate_hard_constraints(candidate: ActionCandidate, state: FacilityState) 
             violated.append("production_below_minimum")
 
     # 5. Temperature must remain within absolute safety limits (comfort +/- margin).
+    #    Uses the 2R2C lumped-capacitance thermal model for physics-informed prediction,
+    #    replacing the old linear approximation (projected_rise = kW * 0.06).
     if candidate.equipment_type == "HVAC":
         zone = get_zone(candidate.zone_id)
         temp = state.zone_temperatures.get(candidate.zone_id)
@@ -78,14 +90,24 @@ def validate_hard_constraints(candidate: ActionCandidate, state: FacilityState) 
             if candidate.proposed_reduction_kw > 10:
                 violated.append("unknown_temperature_conservative_block")
         else:
-            # Reducing HVAC pushes the zone temperature up (cooling capacity drops).
-            # Approximate worst-case temperature rise proportional to reduction size.
-            projected_rise = candidate.proposed_reduction_kw * 0.06
-            projected_temp = temp + projected_rise
+            # Use 2R2C thermal model for physics-informed temperature prediction
             absolute_max = zone.comfort_max + ZONE_SAFETY_MARGIN
-            if projected_temp > absolute_max:
+            prediction = projected_temperature_rise(
+                zone_id=candidate.zone_id,
+                current_temp=temp,
+                hvac_reduction_kw=candidate.proposed_reduction_kw,
+                duration_minutes=30.0,
+                comfort_max=zone.comfort_max,
+                safety_limit=absolute_max,
+                model="2R2C",
+            )
+            if prediction.T_max > absolute_max:
                 violated.append("temperature_absolute_safety_limit")
-            notes.append(f"projected_temp={projected_temp:.1f}C absolute_max={absolute_max:.1f}C")
+            notes.append(
+                f"thermal_model=2R2C projected_max={prediction.T_max:.1f}C "
+                f"absolute_max={absolute_max:.1f}C "
+                f"time_to_safety={prediction.time_to_safety_limit}min"
+            )
 
     # 6. Action cannot exceed equipment available flexibility (checked by caller
     #    via max_reduction_kw before a candidate is even created, but re-verify).
@@ -96,17 +118,32 @@ def validate_hard_constraints(candidate: ActionCandidate, state: FacilityState) 
 
 
 def comfort_penalty(candidate: ActionCandidate, state: FacilityState) -> float:
-    """Soft-constraint penalty: how much occupant comfort is put at risk (0..100)."""
+    """Soft-constraint penalty: how much occupant comfort is put at risk (0..100).
+
+    Uses the 2R2C thermal model to compute a physics-informed comfort risk score
+    based on predicted temperature trajectory during the DR event.
+    """
     if candidate.equipment_type != "HVAC":
         return 0.0
     zone = get_zone(candidate.zone_id)
     temp = state.zone_temperatures.get(candidate.zone_id)
     if temp is None:
         return 25.0  # uncertainty penalty
-    projected_rise = candidate.proposed_reduction_kw * 0.06
-    projected_temp = temp + projected_rise
-    overshoot = max(0.0, projected_temp - zone.comfort_max)
-    return overshoot * 15.0  # penalty scales with how far past comfort_max
+    prediction = projected_temperature_rise(
+        zone_id=candidate.zone_id,
+        current_temp=temp,
+        hvac_reduction_kw=candidate.proposed_reduction_kw,
+        duration_minutes=30.0,
+        comfort_max=zone.comfort_max,
+        safety_limit=zone.comfort_max + ZONE_SAFETY_MARGIN,
+        model="2R2C",
+    )
+    overshoot = max(0.0, prediction.T_max - zone.comfort_max)
+    # Bonus penalty if comfort limit is breached early in the event
+    time_penalty = 0.0
+    if prediction.time_to_comfort_limit is not None:
+        time_penalty = max(0.0, (30.0 - prediction.time_to_comfort_limit) / 30.0) * 5.0
+    return overshoot * 15.0 + time_penalty
 
 
 def disruption_penalty(candidate: ActionCandidate) -> float:

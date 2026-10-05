@@ -82,7 +82,12 @@ def optimize(
 
     candidates = build_candidates(state)
 
-    feasible_equipment = []   # list of (Equipment, max_reduction_kw, comfort_pen, disrupt_pen, pref_pen)
+    # Phase 2: Two-phase optimization for PARTICIPATE_ONLY_IF_NECESSARY.
+    # Phase 1: Build plan WITHOUT participate-if-necessary zones.
+    # Phase 2: If shortfall remains, re-include them with a heavy penalty.
+    pin_zones = state.participate_if_necessary_zones or set()
+
+    feasible_equipment = []   # list of (Equipment, max_reduction_kw, comfort_pen, disrupt_pen, pref_pen, is_pin)
     rejected = []
 
     for e in EQUIPMENT:
@@ -102,15 +107,23 @@ def optimize(
 
         # Determine the actual safe maximum for this equipment (may be capped
         # below its nominal max by e.g. temperature headroom under extreme heat).
+        # Phase 2: Uses the 2R2C thermal model for physics-informed headroom
+        # calculation, replacing the old linear approximation.
         safe_max = e.max_reduction_kw
         if e.equipment_type == "HVAC":
             zone = get_zone(e.zone_id)
             temp = state.zone_temperatures.get(e.zone_id)
             if temp is not None:
-                # headroom before hitting absolute safety limit, translated back to kW
                 from planner.facility_config import ZONE_SAFETY_MARGIN
-                headroom_c = (zone.comfort_max + ZONE_SAFETY_MARGIN) - temp
-                headroom_kw = max(0.0, headroom_c / 0.06)
+                from planner.thermal_model import max_safe_reduction
+                headroom_kw = max_safe_reduction(
+                    zone_id=e.zone_id,
+                    current_temp=temp,
+                    comfort_max=zone.comfort_max,
+                    safety_margin=ZONE_SAFETY_MARGIN,
+                    duration_minutes=30.0,
+                    model="2R2C",
+                )
                 safe_max = min(safe_max, headroom_kw)
             else:
                 safe_max = min(safe_max, 10.0)  # missing-data conservative cap
@@ -126,7 +139,8 @@ def optimize(
         c_pen = comfort_penalty(cand, state)
         d_pen = disruption_penalty(cand)
         p_pen = preference_penalty(cand, occupant_first=(objective == "OCCUPANT_FIRST"))
-        feasible_equipment.append((e, safe_max, c_pen, d_pen, p_pen))
+        is_pin = e.zone_id in pin_zones
+        feasible_equipment.append((e, safe_max, c_pen, d_pen, p_pen, is_pin))
 
     if not feasible_equipment:
         return PlanResult(
@@ -137,38 +151,79 @@ def optimize(
             reason_if_infeasible="No equipment passed hard-constraint validation.",
         )
 
-    model = cp_model.CpModel()
-    reduction_vars = []
-    for e, safe_max, c_pen, d_pen, p_pen in feasible_equipment:
-        lo = 0
-        hi = int(round(safe_max * SCALE))
-        v = model.NewIntVar(lo, hi, f"reduction_{e.equipment_id}")
-        reduction_vars.append(v)
+    # --- Two-phase solve for PARTICIPATE_ONLY_IF_NECESSARY (PIN) ---
+    # Phase 1: Try to satisfy required_reduction_kw WITHOUT equipment from PIN zones.
+    # Phase 2: If shortfall remains, solve with all equipment where PIN equipment
+    #          carries a high graduated penalty so it acts strictly as last-resort flexibility.
+    PIN_PENALTY_MULTIPLIER = 50.0  # heavy penalty to ensure PIN zones are last resort
 
-    total_reduction = sum(reduction_vars)
+    has_pin_equipment = any(is_pin for (_, _, _, _, _, is_pin) in feasible_equipment)
+    non_pin_equipment = [(e, sm, cp, dp, pp, ip) for (e, sm, cp, dp, pp, ip) in feasible_equipment if not ip]
 
-    # Soft target: try to hit required_reduction_kw, but never force it if
-    # infeasible under hard constraints alone (shortfall is allowed and reported).
-    required_scaled = int(round(required_reduction_kw * SCALE))
-    shortfall = model.NewIntVar(0, required_scaled if required_scaled > 0 else 0, "shortfall")
-    model.Add(total_reduction + shortfall >= required_scaled)
+    def _solve_equipment_set(equip_list, apply_pin_penalty: bool = False):
+        """Run CP-SAT solver on a given equipment list."""
+        m = cp_model.CpModel()
+        rvars = []
+        for e, safe_max, c_pen, d_pen, p_pen, is_pin in equip_list:
+            lo = 0
+            hi = int(round(safe_max * SCALE))
+            v = m.NewIntVar(lo, hi, f"reduction_{e.equipment_id}")
+            rvars.append(v)
 
-    # Objective: minimize (peak shortfall, weighted) + energy proxy + comfort + disruption
-    penalty_terms = []
-    for (e, safe_max, c_pen, d_pen, p_pen), v in zip(feasible_equipment, reduction_vars):
-        # penalty per unit of reduction taken from this equipment (scaled)
-        unit_penalty = (weights["comfort"] * c_pen + weights["disruption"] * d_pen + p_pen)
-        unit_penalty_int = max(0, int(round(unit_penalty)))
-        penalty_terms.append(unit_penalty_int * v)
+        total_red = sum(rvars) if rvars else 0
 
-    model.Minimize(
-        weights["peak"] * SCALE * shortfall
-        + sum(penalty_terms)
-    )
+        required_scaled = int(round(required_reduction_kw * SCALE))
+        sf = m.NewIntVar(0, required_scaled if required_scaled > 0 else 0, "shortfall")
+        if rvars:
+            m.Add(total_red + sf >= required_scaled)
+        else:
+            m.Add(sf >= required_scaled)
 
-    solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 5.0
-    status = solver.Solve(model)
+        penalty_terms = []
+        for (e, safe_max, c_pen, d_pen, p_pen, is_pin), v in zip(equip_list, rvars):
+            unit_penalty = (weights["comfort"] * c_pen + weights["disruption"] * d_pen + p_pen)
+            if apply_pin_penalty and is_pin:
+                unit_penalty += 20.0  # Graduated penalty: higher than all normal equipment (0-15), but lower than shortfall
+            unit_penalty_int = max(0, int(round(unit_penalty)))
+            penalty_terms.append(unit_penalty_int * v)
+
+        # Shortfall penalty must dominate so solver fulfills reduction via PIN before accepting shortfall
+        sf_weight = max(int(round(weights["peak"] * SCALE)), 100)
+        m.Minimize(
+            sf_weight * sf
+            + sum(penalty_terms)
+        )
+
+        s = cp_model.CpSolver()
+        s.parameters.max_time_in_seconds = 5.0
+        st = s.Solve(m)
+        return m, rvars, sf, s, st
+
+    active_equipment = feasible_equipment
+    model = None
+    reduction_vars = None
+    shortfall = None
+    solver = None
+    status = None
+
+    # Phase 1: Try without PIN zones if available
+    if has_pin_equipment and non_pin_equipment:
+        m_p1, rvars_p1, sf_p1, solver_p1, status_p1 = _solve_equipment_set(non_pin_equipment, apply_pin_penalty=False)
+        if status_p1 in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            shortfall_p1 = solver_p1.Value(sf_p1) / SCALE
+            if shortfall_p1 <= 0.05:  # Target fully met without PIN zones!
+                model = m_p1
+                reduction_vars = rvars_p1
+                shortfall = sf_p1
+                solver = solver_p1
+                status = status_p1
+                active_equipment = non_pin_equipment
+
+    # Phase 2: If Phase 1 did not eliminate shortfall or had no non-PIN equipment,
+    # solve with the full set, penalizing PIN equipment to minimize its use.
+    if solver is None:
+        model, reduction_vars, shortfall, solver, status = _solve_equipment_set(feasible_equipment, apply_pin_penalty=True)
+        active_equipment = feasible_equipment
 
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return PlanResult(
@@ -182,7 +237,7 @@ def optimize(
     actions = []
     total_kw = 0.0
     total_comfort_risk = 0.0
-    for (e, safe_max, c_pen, d_pen, p_pen), v in zip(feasible_equipment, reduction_vars):
+    for (e, safe_max, c_pen, d_pen, p_pen, is_pin), v in zip(active_equipment, reduction_vars):
         kw = solver.Value(v) / SCALE
         if kw >= max(0.5, e.min_reduction_kw * 0.25):  # ignore negligible allocations
             reasons = []
@@ -193,6 +248,8 @@ def optimize(
                 reasons.append(f"comfort risk score {c_pen:.1f}")
             if e.zone_id not in state.opted_out_zones:
                 reasons.append("no opt-out conflict")
+            if is_pin:
+                reasons.append("PARTICIPATE_ONLY_IF_NECESSARY zone (last-resort inclusion)")
             reasons.append(f"{kw:.0f} kW available reduction")
             actions.append(PlannedAction(
                 equipment_id=e.equipment_id, zone_id=e.zone_id, equipment_type=e.equipment_type,
@@ -217,3 +274,4 @@ def optimize(
             f"Target reduction not fully reachable; shortfall of {shortfall_val:.1f} kW remains "
             f"after respecting comfort and operational constraints.",
     )
+
